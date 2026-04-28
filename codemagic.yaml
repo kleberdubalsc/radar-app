@@ -1,0 +1,26 @@
+workflows:
+  android-workflow:
+    name: Radar Android Build
+    max_build_duration: 60
+    environment:
+      android_signing:
+        - keystore_reference
+      vars:
+        PACKAGE_NAME: "com.kleber.radar"
+    scripts:
+      - name: Set Android SDK location
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
+      - name: Build APK debug
+        script: |
+          cd $CM_BUILD_DIR
+          ./gradlew assembleDebug
+    artifacts:
+      - app/build/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - kleberdubalsc@gmail.com
+        notify:
+          success: true
+          failure: true

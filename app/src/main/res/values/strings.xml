@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Radar</string>
+    <string name="accessibility_service_label">Radar — Análise de Corridas</string>
+    <string name="accessibility_service_description">O Radar monitora as ofertas de corrida do Uber para analisar a rentabilidade e ajudar você a tomar melhores decisões. Nenhum dado pessoal é coletado ou compartilhado.</string>
+</resources>
