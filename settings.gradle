@@ -10,12 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://jitpack.io' }
     }
 }
-
 rootProject.name = "Radar"
 include ':app'
-
-
-
-
