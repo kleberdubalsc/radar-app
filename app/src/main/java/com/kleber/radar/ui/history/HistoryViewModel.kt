@@ -2,6 +2,7 @@ package com.kleber.radar.ui.history
 
 import android.app.Application
 import androidx.lifecycle.*
+import kotlinx.coroutines.launch
 import com.kleber.radar.R
 import com.kleber.radar.data.db.RadarDatabase
 import com.kleber.radar.data.model.Trip
