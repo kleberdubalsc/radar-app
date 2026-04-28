@@ -10,12 +10,11 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <!-- Status do serviço -->
         <TextView
             android:id="@+id/tv_status_ok"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="🟢 Radar ativo — monitorando Uber"
+            android:text="🟢 Radar ativo"
             android:textColor="#4CAF50"
             android:textSize="14sp"
             android:gravity="center"
@@ -26,7 +25,7 @@
             android:id="@+id/btn_enable_accessibility"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="⚠️ Ativar Acessibilidade"
+            android:text="Ativar Acessibilidade"
             android:layout_marginBottom="8dp"
             android:visibility="gone" />
 
@@ -34,17 +33,15 @@
             android:id="@+id/btn_enable_overlay"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="⚠️ Permitir exibição sobre outros apps"
+            android:text="Permitir overlay"
             android:layout_marginBottom="16dp"
             android:visibility="gone" />
 
-        <!-- Dashboard hoje -->
         <TextView
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="HOJE"
             android:textSize="12sp"
-            android:textColor="@color/md_theme_onSurfaceVariant"
             android:layout_marginBottom="8dp" />
 
         <LinearLayout
