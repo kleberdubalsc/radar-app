@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@+id/homeFragment" android:title="Dashboard" android:icon="@android:drawable/ic_menu_today" />
-    <item android:id="@+id/historyFragment" android:title="Histórico" android:icon="@android:drawable/ic_menu_recent_history" />
-    <item android:id="@+id/settingsFragment" android:title="Config" android:icon="@android:drawable/ic_menu_preferences" />
-</menu>
