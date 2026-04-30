@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="16dp">
@@ -10,11 +9,12 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
+        <!-- Status do serviço -->
         <TextView
             android:id="@+id/tv_status_ok"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="🟢 Radar ativo"
+            android:text="🟢 Radar ativo — monitorando Uber"
             android:textColor="#4CAF50"
             android:textSize="14sp"
             android:gravity="center"
@@ -25,7 +25,7 @@
             android:id="@+id/btn_enable_accessibility"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Ativar Acessibilidade"
+            android:text="⚠️ Ativar Acessibilidade"
             android:layout_marginBottom="8dp"
             android:visibility="gone" />
 
@@ -33,15 +33,17 @@
             android:id="@+id/btn_enable_overlay"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Permitir overlay"
+            android:text="⚠️ Permitir exibição sobre outros apps"
             android:layout_marginBottom="16dp"
             android:visibility="gone" />
 
+        <!-- Dashboard hoje -->
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="HOJE"
             android:textSize="12sp"
+            android:textColor="@color/md_theme_onSurfaceVariant"
             android:layout_marginBottom="8dp" />
 
         <LinearLayout
