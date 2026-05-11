@@ -3,6 +3,7 @@ package com.kleber.radar.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
+import android.os.Build
 import android.speech.tts.TextToSpeech
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -28,6 +29,7 @@ class RadarAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+
         repository = TripRepository(RadarDatabase.getInstance(this).tripDao())
         settingsManager = SettingsManager(this)
 
@@ -39,12 +41,17 @@ class RadarAccessibilityService : AccessibilityService() {
 
         serviceInfo = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
-                         AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                    AccessibilityEvent.TYPE_VIEW_SCROLLED or
+                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or
+                    AccessibilityEvent.TYPE_WINDOWS_CHANGED
+
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-            // Sem packageNames = filtro feito no código
             notificationTimeout = 100
+
             flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                    AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
         }
 
         debugLog("=== SERVICO INICIADO ===")
@@ -52,33 +59,65 @@ class RadarAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
-        val pkg = event.packageName?.toString() ?: return
 
-        // Filtra apps de motorista
-        val isDriverApp = pkg.contains("ubercab", ignoreCase = true) ||
-                pkg.contains("99taxis", ignoreCase = true) ||
-                pkg.contains("indriver", ignoreCase = true)
+        val pkg = event.packageName?.toString() ?: "sem_pacote"
+        val now = System.currentTimeMillis()
+
+        if (now - lastDebugTimestamp > 2000) {
+            lastDebugTimestamp = now
+            debugLog("EVENTO RECEBIDO | package=$pkg | type=${event.eventType}")
+        }
+
+        val isDriverApp =
+            pkg.contains("ubercab", ignoreCase = true) ||
+            pkg.contains("uber", ignoreCase = true) ||
+            pkg.contains("99taxis", ignoreCase = true) ||
+            pkg.contains("indriver", ignoreCase = true)
 
         if (!isDriverApp) return
 
-        val root = rootInActiveWindow ?: return
-
         val allText = mutableListOf<String>()
-        collectText(root, allText)
-        val fullText = allText.joinToString(" | ")
 
-        if (fullText.isBlank()) return
-
-        // Salva debug a cada 2s (evita encher arquivo)
-        val now = System.currentTimeMillis()
-        if (now - lastDebugTimestamp > 2000) {
-            lastDebugTimestamp = now
-            debugLog("PACKAGE: $pkg\nTEXTO:\n$fullText")
+        try {
+            rootInActiveWindow?.let { root ->
+                collectText(root, allText)
+            }
+        } catch (e: Exception) {
+            debugLog("ERRO lendo rootInActiveWindow: ${e.message}")
         }
 
-        val tripData = extractTripData(fullText) ?: return
+        try {
+            windows?.forEach { window ->
+                window.root?.let { root ->
+                    collectText(root, allText)
+                }
+            }
+        } catch (e: Exception) {
+            debugLog("ERRO lendo windows: ${e.message}")
+        }
 
-        val key = "${tripData.value}-${tripData.distance}"
+        val fullText = allText
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(" | ")
+
+        if (fullText.isBlank()) {
+            debugLog("PACKAGE: $pkg | SEM TEXTO CAPTURADO")
+            return
+        }
+
+        debugLog("PACKAGE: $pkg\nTEXTO CAPTURADO:\n$fullText")
+
+        val tripData = extractTripData(fullText)
+
+        if (tripData == null) {
+            debugLog("NAO EXTRAIU CORRIDA DO TEXTO ACIMA")
+            return
+        }
+
+        val key = "${tripData.value}-${tripData.distance}-${tripData.minutes}"
+
         if (key == lastProcessedText) return
         lastProcessedText = key
 
@@ -86,6 +125,7 @@ class RadarAccessibilityService : AccessibilityService() {
 
         scope.launch {
             val settings = settingsManager.getSettings()
+
             val trip = TripAnalyzer.analyze(
                 grossValue = tripData.value,
                 distanceKm = tripData.distance,
@@ -98,7 +138,12 @@ class RadarAccessibilityService : AccessibilityService() {
             repository.insert(trip)
 
             if (settings.voiceNotificationEnabled) {
-                tts.speak(TripAnalyzer.gradeLabel(trip.grade), TextToSpeech.QUEUE_FLUSH, null, null)
+                tts.speak(
+                    TripAnalyzer.gradeLabel(trip.grade),
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    null
+                )
             }
 
             if (settings.overlayEnabled) {
@@ -110,7 +155,12 @@ class RadarAccessibilityService : AccessibilityService() {
                     putExtra("distance", trip.distanceKm)
                     putExtra("minutes", trip.estimatedMinutes)
                 }
-                startService(intent)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
             }
         }
     }
@@ -125,29 +175,77 @@ class RadarAccessibilityService : AccessibilityService() {
 
     private fun extractTripData(fullText: String): RawTripData? {
         return try {
-            val valueRegex = Regex("""R\$\s*([\d.,]+)""")
-            val tripDistanceRegex = Regex("""Viagem de \d+\s*minutos?\s*\(([\d.,]+)\s*km\)""")
-            val tripMinutesRegex = Regex("""Viagem de (\d+)\s*minutos?""")
+            val text = fullText
+                .replace("|", " ")
+                .replace("\n", " ")
+                .replace("\r", " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
 
-            val value = valueRegex.find(fullText)?.groupValues?.get(1)
-                ?.replace(".", "")?.replace(",", ".")?.toDoubleOrNull() ?: return null
-            val distance = tripDistanceRegex.find(fullText)?.groupValues?.get(1)
-                ?.replace(",", ".")?.toDoubleOrNull() ?: return null
-            val minutes = tripMinutesRegex.find(fullText)?.groupValues?.get(1)
-                ?.toIntOrNull() ?: return null
+            debugLog("TEXTO NORMALIZADO:\n$text")
 
-            RawTripData(value, distance, minutes, "", "")
+            val valueRegex = Regex("""R\$\s*([\d.]+,\d{2}|[\d]+[.,]\d{2})""")
+            val minuteRegex = Regex("""(\d+)\s*min(?:uto)?s?""", RegexOption.IGNORE_CASE)
+            val kmRegex = Regex("""([\d]+(?:[,.]\d+)?)\s*km""", RegexOption.IGNORE_CASE)
+
+            val value = valueRegex.find(text)
+                ?.groupValues
+                ?.get(1)
+                ?.replace(".", "")
+                ?.replace(",", ".")
+                ?.toDoubleOrNull()
+                ?: return null
+
+            val minutes = minuteRegex.find(text)
+                ?.groupValues
+                ?.get(1)
+                ?.toIntOrNull()
+                ?: return null
+
+            val distance = kmRegex.findAll(text)
+                .mapNotNull {
+                    it.groupValues.getOrNull(1)
+                        ?.replace(",", ".")
+                        ?.toDoubleOrNull()
+                }
+                .lastOrNull()
+                ?: return null
+
+            RawTripData(
+                value = value,
+                distance = distance,
+                minutes = minutes,
+                origin = "",
+                dest = ""
+            )
+
         } catch (e: Exception) {
-            debugLog("ERRO regex: ${e.message}")
+            debugLog("ERRO extractTripData: ${e.message}")
             null
         }
     }
 
     private fun collectText(node: AccessibilityNodeInfo, list: MutableList<String>) {
-        node.text?.toString()?.let { if (it.isNotBlank()) list.add(it) }
-        node.contentDescription?.toString()?.let { if (it.isNotBlank()) list.add(it) }
-        for (i in 0 until node.childCount) {
-            node.getChild(i)?.let { collectText(it, list) }
+        try {
+            node.text?.toString()?.let {
+                if (it.isNotBlank()) list.add(it)
+            }
+
+            node.contentDescription?.toString()?.let {
+                if (it.isNotBlank()) list.add(it)
+            }
+
+            node.viewIdResourceName?.toString()?.let {
+                if (it.isNotBlank()) list.add("VIEW_ID:$it")
+            }
+
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { child ->
+                    collectText(child, list)
+                }
+            }
+        } catch (e: Exception) {
+            debugLog("ERRO collectText: ${e.message}")
         }
     }
 
@@ -161,7 +259,8 @@ class RadarAccessibilityService : AccessibilityService() {
                 val keep = debugFile.readText().takeLast(250_000)
                 debugFile.writeText(keep)
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
     override fun onInterrupt() {}
@@ -170,6 +269,9 @@ class RadarAccessibilityService : AccessibilityService() {
         super.onDestroy()
         debugLog("=== SERVICO PARADO ===")
         scope.cancel()
-        if (::tts.isInitialized) tts.shutdown()
+
+        if (::tts.isInitialized) {
+            tts.shutdown()
+        }
     }
 }
