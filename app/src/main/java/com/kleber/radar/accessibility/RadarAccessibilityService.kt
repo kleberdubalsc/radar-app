@@ -58,7 +58,7 @@ class RadarAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED
 
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-            notificationTimeout = 100
+            notificationTimeout = 50
 
             flags =
                 AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
@@ -76,7 +76,7 @@ class RadarAccessibilityService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: "sem_pacote"
         val now = System.currentTimeMillis()
 
-        if (now - lastDebugTimestamp > 2000) {
+        if (now - lastDebugTimestamp > 1500) {
             lastDebugTimestamp = now
             debugLog("EVENTO RECEBIDO | package=$pkg | type=${event.eventType}")
         }
@@ -102,7 +102,7 @@ class RadarAccessibilityService : AccessibilityService() {
 
             while (isActive) {
                 try {
-                    delay(1000)
+                    delay(300)
                     processCurrentWindow("POLLING")
                 } catch (e: Exception) {
                     debugLog("ERRO polling: ${e.message}")
@@ -144,11 +144,10 @@ class RadarAccessibilityService : AccessibilityService() {
             fullText.contains("R$", ignoreCase = true) &&
             (
                 fullText.contains("Viagem de", ignoreCase = true) ||
-                fullText.contains("minutos", ignoreCase = true) ||
-                fullText.contains("min", ignoreCase = true) ||
-                fullText.contains("km", ignoreCase = true) ||
+                fullText.contains("Selecionar", ignoreCase = true) ||
                 fullText.contains("Aceitar", ignoreCase = true) ||
-                fullText.contains("UberX", ignoreCase = true)
+                fullText.contains("UberX", ignoreCase = true) ||
+                fullText.contains("km", ignoreCase = true)
             )
 
         if (!looksLikeTripScreen) return
@@ -200,7 +199,10 @@ class RadarAccessibilityService : AccessibilityService() {
                 }
 
                 if (settings.overlayEnabled) {
-                    val intent = Intent(this@RadarAccessibilityService, OverlayService::class.java).apply {
+                    val intent = Intent(
+                        this@RadarAccessibilityService,
+                        OverlayService::class.java
+                    ).apply {
                         putExtra("grade", trip.grade.name)
                         putExtra("earnings_km", trip.earningsPerKm)
                         putExtra("earnings_hour", trip.earningsPerHour)
@@ -209,12 +211,17 @@ class RadarAccessibilityService : AccessibilityService() {
                         putExtra("minutes", trip.estimatedMinutes)
                     }
 
+                    debugLog("INICIANDO OVERLAY grade=${trip.grade.name}")
+
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         startForegroundService(intent)
                     } else {
                         startService(intent)
                     }
+                } else {
+                    debugLog("OVERLAY DESATIVADO NAS CONFIGURACOES")
                 }
+
             } catch (e: Exception) {
                 debugLog("ERRO analyzeAndShowTrip: ${e.message}")
             }
@@ -245,18 +252,22 @@ class RadarAccessibilityService : AccessibilityService() {
                 RegexOption.IGNORE_CASE
             )
 
+            val values = valueRegex.findAll(text)
+                .mapNotNull { match ->
+                    match.groupValues.getOrNull(1)
+                        ?.replace(".", "")
+                        ?.replace(",", ".")
+                        ?.toDoubleOrNull()
+                }
+                .filter { it > 0.0 }
+                .toList()
+
+            val value = values.lastOrNull() ?: return null
+
             val tripRegex = Regex(
-                """Viagem\s+de\s+(?:(\d+)\s*h\s*(?:e\s*)?)?(?:(\d+)\s*min(?:uto)?s?)?\s*\(([\d]+(?:[,.]\d+)?)\s*km\)""",
+                """Viagem\s+de\s+(?:(\d+)\s*h\s*(?:e\s*)?)?(?:(\d+)\s*min(?:uto)?s?)?\s*\(?\s*([\d]+(?:[,.]\d+)?)\s*km\s*\)?""",
                 RegexOption.IGNORE_CASE
             )
-
-            val value = valueRegex.find(text)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.replace(".", "")
-                ?.replace(",", ".")
-                ?.toDoubleOrNull()
-                ?: return null
 
             val tripMatch = tripRegex.find(text) ?: return null
 
@@ -279,6 +290,8 @@ class RadarAccessibilityService : AccessibilityService() {
 
             if (totalMinutes <= 0 || distance <= 0.0) return null
 
+            debugLog("REGEX OK: valor=$value minutos=$totalMinutes distancia=$distance")
+
             RawTripData(
                 value = value,
                 distance = distance,
@@ -286,6 +299,7 @@ class RadarAccessibilityService : AccessibilityService() {
                 origin = extractOrigin(text),
                 dest = extractDestination(text)
             )
+
         } catch (e: Exception) {
             debugLog("ERRO extractTripData: ${e.message}")
             null
@@ -312,7 +326,7 @@ class RadarAccessibilityService : AccessibilityService() {
     private fun extractDestination(text: String): String {
         return try {
             val destinationRegex = Regex(
-                """Viagem\s+de\s+(?:(?:\d+)\s*h\s*(?:e\s*)?)?(?:(?:\d+)\s*min(?:uto)?s?)?\s*\((?:[\d]+(?:[,.]\d+)?)\s*km\)\s+(.+?)(?:\s+Aceitar|\s+VIEW_ID:|$)""",
+                """Viagem\s+de\s+(?:(?:\d+)\s*h\s*(?:e\s*)?)?(?:(?:\d+)\s*min(?:uto)?s?)?\s*\(?\s*(?:[\d]+(?:[,.]\d+)?)\s*km\s*\)?\s+(.+?)(?:\s+Selecionar|\s+Aceitar|\s+VIEW_ID:|$)""",
                 RegexOption.IGNORE_CASE
             )
 
@@ -343,6 +357,7 @@ class RadarAccessibilityService : AccessibilityService() {
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { child ->
                     collectText(child, list)
+                    child.recycle()
                 }
             }
         } catch (e: Exception) {
@@ -357,8 +372,8 @@ class RadarAccessibilityService : AccessibilityService() {
 
             debugFile.appendText("\n[$timestamp] $message\n")
 
-            if (debugFile.length() > 500_000) {
-                val keep = debugFile.readText().takeLast(250_000)
+            if (debugFile.length() > 800_000) {
+                val keep = debugFile.readText().takeLast(400_000)
                 debugFile.writeText(keep)
             }
         } catch (_: Exception) {
