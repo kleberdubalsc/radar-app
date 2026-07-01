@@ -5,3 +5,8 @@ gradle-8.2/
 local.properties
 radar_debug.txt
 *.save
+
+.gradle/
+local.properties
+radar_debug.txt
+*.save
