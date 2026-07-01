@@ -12,6 +12,7 @@ import com.kleber.radar.data.repository.TripRepository
 import com.kleber.radar.service.OverlayService
 import com.kleber.radar.util.SettingsManager
 import com.kleber.radar.util.TripAnalyzer
+import com.kleber.radar.util.UberOfferParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,6 +35,7 @@ class RadarAccessibilityService : AccessibilityService() {
     private lateinit var settingsManager: SettingsManager
 
     private var lastProcessedText = ""
+    private var lastFailedParserText = ""
     private var lastDebugTimestamp = 0L
     private var pollingJob: Job? = null
 
@@ -167,7 +169,11 @@ class RadarAccessibilityService : AccessibilityService() {
         lastProcessedText = key
 
         debugLog(
-            "[$source] EXTRAIU: valor=${tripData.value} dist=${tripData.distance}km min=${tripData.minutes}"
+            "[$source] EXTRAIU: valor=${tripData.value} " +
+                "dist_total=${tripData.distance}km dist_ate_passageiro=${tripData.pickupDistanceKm ?: "NA"}km " +
+                "dist_viagem=${tripData.tripDistanceKm}km min_total=${tripData.minutes} " +
+                "min_ate_passageiro=${tripData.pickupMinutes ?: "NA"} min_viagem=${tripData.tripMinutes} " +
+                "modalidade=${tripData.modality.ifBlank { "NA" }} destino=${tripData.dest.ifBlank { "NA" }}"
         )
 
         analyzeAndShowTrip(tripData)
@@ -233,110 +239,45 @@ class RadarAccessibilityService : AccessibilityService() {
         val distance: Double,
         val minutes: Int,
         val origin: String,
-        val dest: String
+        val dest: String,
+        val pickupDistanceKm: Double?,
+        val tripDistanceKm: Double,
+        val pickupMinutes: Int?,
+        val tripMinutes: Int,
+        val modality: String
     )
 
     private fun extractTripData(fullText: String): RawTripData? {
         return try {
-            val text = fullText
-                .replace("|", " ")
-                .replace("\n", " ")
-                .replace("\r", " ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
+            val diagnostic = UberOfferParser.diagnoseStructured(fullText)
+            val offer = diagnostic.toOfferData()
 
-            debugLog("TEXTO NORMALIZADO:\n$text")
-
-            val valueRegex = Regex(
-                """R\$\s*([\d.]+,\d{2}|[\d]+[.,]\d{2})""",
-                RegexOption.IGNORE_CASE
-            )
-
-            val values = valueRegex.findAll(text)
-                .mapNotNull { match ->
-                    match.groupValues.getOrNull(1)
-                        ?.replace(".", "")
-                        ?.replace(",", ".")
-                        ?.toDoubleOrNull()
+            if (offer == null) {
+                if (diagnostic.normalizedText != lastFailedParserText) {
+                    lastFailedParserText = diagnostic.normalizedText
+                    debugLog("PARSER FALHOU:\n${diagnostic.toLogString(includeText = true)}")
                 }
-                .filter { it > 0.0 }
-                .toList()
+                return null
+            }
 
-            val value = values.lastOrNull() ?: return null
-
-            val tripRegex = Regex(
-                """Viagem\s+de\s+(?:(\d+)\s*h\s*(?:e\s*)?)?(?:(\d+)\s*min(?:uto)?s?)?\s*\(?\s*([\d]+(?:[,.]\d+)?)\s*km\s*\)?""",
-                RegexOption.IGNORE_CASE
-            )
-
-            val tripMatch = tripRegex.find(text) ?: return null
-
-            val hours = tripMatch.groupValues.getOrNull(1)
-                ?.takeIf { it.isNotBlank() }
-                ?.toIntOrNull()
-                ?: 0
-
-            val minutesOnly = tripMatch.groupValues.getOrNull(2)
-                ?.takeIf { it.isNotBlank() }
-                ?.toIntOrNull()
-                ?: 0
-
-            val totalMinutes = (hours * 60) + minutesOnly
-
-            val distance = tripMatch.groupValues.getOrNull(3)
-                ?.replace(",", ".")
-                ?.toDoubleOrNull()
-                ?: return null
-
-            if (totalMinutes <= 0 || distance <= 0.0) return null
-
-            debugLog("REGEX OK: valor=$value minutos=$totalMinutes distancia=$distance")
+            lastFailedParserText = ""
 
             RawTripData(
-                value = value,
-                distance = distance,
-                minutes = totalMinutes,
-                origin = extractOrigin(text),
-                dest = extractDestination(text)
+                value = offer.value,
+                distance = offer.totalDistanceKm,
+                minutes = offer.totalMinutes,
+                origin = offer.origin,
+                dest = offer.destination,
+                pickupDistanceKm = offer.pickupDistanceKm,
+                tripDistanceKm = offer.tripDistanceKm,
+                pickupMinutes = offer.pickupMinutes,
+                tripMinutes = offer.tripMinutes,
+                modality = offer.modality
             )
 
         } catch (e: Exception) {
             debugLog("ERRO extractTripData: ${e.message}")
             null
-        }
-    }
-
-    private fun extractOrigin(text: String): String {
-        return try {
-            val pickupRegex = Regex(
-                """(?:de distância)\s+(.+?)\s+Viagem de""",
-                RegexOption.IGNORE_CASE
-            )
-
-            pickupRegex.find(text)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.trim()
-                ?: ""
-        } catch (_: Exception) {
-            ""
-        }
-    }
-
-    private fun extractDestination(text: String): String {
-        return try {
-            val destinationRegex = Regex(
-                """Viagem\s+de\s+(?:(?:\d+)\s*h\s*(?:e\s*)?)?(?:(?:\d+)\s*min(?:uto)?s?)?\s*\(?\s*(?:[\d]+(?:[,.]\d+)?)\s*km\s*\)?\s+(.+?)(?:\s+Selecionar|\s+Aceitar|\s+VIEW_ID:|$)""",
-                RegexOption.IGNORE_CASE
-            )
-
-            destinationRegex.find(text)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.trim()
-                ?: ""
-        } catch (_: Exception) {
-            ""
         }
     }
 

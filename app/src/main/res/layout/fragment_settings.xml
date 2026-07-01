@@ -94,7 +94,35 @@
             android:id="@+id/btn_save"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Salvar configurações" />
+            android:text="Salvar configurações"
+            android:layout_marginBottom="24dp" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="DIAGNÓSTICO DO PARSER" android:textSize="12sp" android:layout_marginBottom="8dp"/>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="Cole aqui texto do radar_debug.txt" android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_parser_input" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:gravity="top"
+                android:inputType="textMultiLine" android:minLines="4" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_test_parser"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Testar parser"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tv_parser_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Resultado do diagnóstico aparecerá aqui"
+            android:textIsSelectable="true"
+            android:textSize="12sp" />
 
     </LinearLayout>
 </ScrollView>

@@ -5,6 +5,7 @@ import android.view.*
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import com.kleber.radar.databinding.FragmentSettingsBinding
+import com.kleber.radar.util.UberOfferParser
 
 class SettingsFragment : Fragment() {
 
@@ -44,6 +45,11 @@ class SettingsFragment : Fragment() {
                 voiceEnabled = binding.switchVoice.isChecked,
                 overlayEnabled = binding.switchOverlay.isChecked
             )
+        }
+
+        binding.btnTestParser.setOnClickListener {
+            val input = binding.etParserInput.text?.toString().orEmpty()
+            binding.tvParserResult.text = UberOfferParser.diagnose(input)
         }
     }
 
