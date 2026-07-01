@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.kleber.radar.data.db.RadarDatabase
 import com.kleber.radar.data.repository.TripRepository
 import com.kleber.radar.service.OverlayService
+import com.kleber.radar.util.AccessibilityDebugStore
 import com.kleber.radar.util.SettingsManager
 import com.kleber.radar.util.TripAnalyzer
 import com.kleber.radar.util.UberOfferParser
@@ -36,7 +37,6 @@ class RadarAccessibilityService : AccessibilityService() {
 
     private var lastProcessedText = ""
     private var lastFailedParserText = ""
-    private var lastDebugTimestamp = 0L
     private var pollingJob: Job? = null
 
     override fun onServiceConnected() {
@@ -68,7 +68,12 @@ class RadarAccessibilityService : AccessibilityService() {
                 AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
         }
 
-        debugLog("=== SERVICO INICIADO ===")
+        AccessibilityDebugStore.markServiceConnected(this)
+        debugLog(
+            "=== SERVICO INICIADO ===\n" +
+                "canRetrieveWindowContent=true | eventTypes=${serviceInfo.eventTypes} | " +
+                "flags=${serviceInfo.flags} | notificationTimeout=${serviceInfo.notificationTimeout}"
+        )
         startScreenPolling()
     }
 
@@ -76,24 +81,28 @@ class RadarAccessibilityService : AccessibilityService() {
         event ?: return
 
         val pkg = event.packageName?.toString() ?: "sem_pacote"
-        val now = System.currentTimeMillis()
-
-        if (now - lastDebugTimestamp > 1500) {
-            lastDebugTimestamp = now
-            debugLog("EVENTO RECEBIDO | package=$pkg | type=${event.eventType}")
+        val className = event.className?.toString() ?: "sem_classe"
+        val eventType = event.eventType
+        if (!pkg.equals(packageName, ignoreCase = true)) {
+            AccessibilityDebugStore.saveEvent(this, pkg, className, eventType)
         }
 
-        val isRelevantPackage =
-            pkg.contains("ubercab", ignoreCase = true) ||
-            pkg.contains("uber", ignoreCase = true) ||
-            pkg.contains("whatsapp", ignoreCase = true) ||
-            pkg.contains("photos", ignoreCase = true) ||
-            pkg.contains("gallery", ignoreCase = true) ||
-            pkg.contains("android.systemui", ignoreCase = true)
+        val isUberPackage =
+            pkg.equals("com.ubercab.driver", ignoreCase = true) ||
+                pkg.contains("ubercab", ignoreCase = true) ||
+                pkg.contains("uber", ignoreCase = true)
 
-        if (isRelevantPackage) {
-            processCurrentWindow("EVENTO:$pkg")
-        }
+        debugLog(
+            "ON_ACCESSIBILITY_EVENT | type=$eventType | package=$pkg | class=$className | " +
+                "uberPackage=$isUberPackage"
+        )
+
+        processCurrentWindow(
+            source = "EVENTO:$pkg",
+            eventPackage = pkg,
+            eventClassName = className,
+            eventType = eventType
+        )
     }
 
     private fun startScreenPolling() {
@@ -113,11 +122,28 @@ class RadarAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun processCurrentWindow(source: String) {
+    private fun processCurrentWindow(
+        source: String,
+        eventPackage: String = "POLLING",
+        eventClassName: String = "POLLING",
+        eventType: Int = -1
+    ) {
         val allText = mutableListOf<String>()
+        var activePackage = eventPackage
 
         try {
-            rootInActiveWindow?.let { root ->
+            val root = rootInActiveWindow
+            if (root == null) {
+                debugLog(
+                    "ROOT NULL [$source] | package=$eventPackage | class=$eventClassName | type=$eventType | " +
+                        "motivo=sem janela ativa, conteudo nao disponivel ou app bloqueou acessibilidade"
+                )
+            } else {
+                activePackage = root.packageName?.toString() ?: eventPackage
+                debugLog(
+                    "ROOT OK [$source] | package=$activePackage | " +
+                        "class=${root.className ?: "sem_classe"} | children=${root.childCount}"
+                )
                 collectText(root, allText)
             }
         } catch (e: Exception) {
@@ -125,8 +151,17 @@ class RadarAccessibilityService : AccessibilityService() {
         }
 
         try {
-            windows?.forEach { window ->
+            val currentWindows = windows
+            debugLog("WINDOWS [$source] | count=${currentWindows?.size ?: 0}")
+            currentWindows?.forEach { window ->
                 window.root?.let { root ->
+                    if (activePackage == "POLLING" || activePackage == "sem_pacote") {
+                        activePackage = root.packageName?.toString() ?: activePackage
+                    }
+                    debugLog(
+                        "WINDOW ROOT [$source] | package=${root.packageName ?: "sem_pacote"} | " +
+                            "class=${root.className ?: "sem_classe"} | children=${root.childCount}"
+                    )
                     collectText(root, allText)
                 }
             }
@@ -140,7 +175,28 @@ class RadarAccessibilityService : AccessibilityService() {
             .distinct()
             .joinToString(" | ")
 
-        if (fullText.isBlank()) return
+        debugLog(
+            "CAPTURA [$source] | package=$eventPackage | class=$eventClassName | type=$eventType | " +
+                "textCount=${allText.size} | distinctTextCount=${allText.distinct().size}"
+        )
+
+        if (fullText.isBlank()) {
+            debugLog("CAPTURA SEM TEXTO [$source] | package=$eventPackage")
+            return
+        }
+
+        if (!activePackage.equals(packageName, ignoreCase = true)) {
+            AccessibilityDebugStore.saveCapture(
+                context = this,
+                packageName = activePackage,
+                className = eventClassName,
+                eventType = eventType,
+                textCount = allText.distinct().size,
+                text = fullText
+            )
+        }
+
+        debugLog("[$source] TEXTO BRUTO COLETADO (${allText.distinct().size} itens):\n$fullText")
 
         val looksLikeTripScreen =
             fullText.contains("R$", ignoreCase = true) &&
@@ -153,8 +209,6 @@ class RadarAccessibilityService : AccessibilityService() {
             )
 
         if (!looksLikeTripScreen) return
-
-        debugLog("[$source] TEXTO CAPTURADO:\n$fullText")
 
         val tripData = extractTripData(fullText)
 
@@ -284,15 +338,21 @@ class RadarAccessibilityService : AccessibilityService() {
     private fun collectText(node: AccessibilityNodeInfo, list: MutableList<String>) {
         try {
             node.text?.toString()?.let {
-                if (it.isNotBlank()) list.add(it)
+                if (it.isNotBlank()) {
+                    list.add(it)
+                    debugLog("collectText TEXT | ${it.take(250)}")
+                }
             }
 
             node.contentDescription?.toString()?.let {
-                if (it.isNotBlank()) list.add(it)
+                if (it.isNotBlank()) {
+                    list.add(it)
+                    debugLog("collectText CONTENT_DESC | ${it.take(250)}")
+                }
             }
 
             node.viewIdResourceName?.toString()?.let {
-                if (it.isNotBlank()) list.add("VIEW_ID:$it")
+                if (it.isNotBlank()) debugLog("collectText VIEW_ID | $it")
             }
 
             for (i in 0 until node.childCount) {
@@ -311,6 +371,7 @@ class RadarAccessibilityService : AccessibilityService() {
             val debugFile = File(applicationContext.getExternalFilesDir(null), "radar_debug.txt")
             val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
+            debugFile.parentFile?.mkdirs()
             debugFile.appendText("\n[$timestamp] $message\n")
 
             if (debugFile.length() > 800_000) {

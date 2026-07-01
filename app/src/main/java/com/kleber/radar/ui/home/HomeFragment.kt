@@ -10,12 +10,17 @@ import androidx.fragment.app.viewModels
 import com.kleber.radar.R
 import com.kleber.radar.data.model.TripGrade
 import com.kleber.radar.databinding.FragmentHomeBinding
+import com.kleber.radar.util.AccessibilityDebugStore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class HomeFragment : Fragment() {
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
     private val viewModel: HomeViewModel by viewModels()
+    private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale("pt", "BR"))
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentHomeBinding.inflate(inflater, container, false)
@@ -27,6 +32,7 @@ class HomeFragment : Fragment() {
 
         observeData()
         checkPermissions()
+        refreshAccessibilityDebug()
 
         binding.btnEnableAccessibility.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -35,6 +41,11 @@ class HomeFragment : Fragment() {
         binding.btnEnableOverlay.setOnClickListener {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:${requireContext().packageName}")))
+        }
+
+        binding.btnRefreshAccessibilityDebug.setOnClickListener {
+            checkPermissions()
+            refreshAccessibilityDebug()
         }
     }
 
@@ -66,6 +77,26 @@ class HomeFragment : Fragment() {
         binding.btnEnableAccessibility.visibility = if (hasAccessibility) View.GONE else View.VISIBLE
         binding.btnEnableOverlay.visibility = if (hasOverlay) View.GONE else View.VISIBLE
         binding.tvStatusOk.visibility = if (hasAccessibility && hasOverlay) View.VISIBLE else View.GONE
+        binding.tvAccessibilityState.text = if (hasAccessibility) {
+            "Serviço de acessibilidade: ATIVO"
+        } else {
+            "Serviço de acessibilidade: INATIVO"
+        }
+    }
+
+    private fun refreshAccessibilityDebug() {
+        val state = AccessibilityDebugStore.read(requireContext())
+        binding.tvServiceConnectedAt.text = "Serviço conectado em: ${formatTime(state.serviceConnectedAt)}"
+        binding.tvLastPackage.text = "Último pacote: ${state.lastPackage.ifBlank { "nenhum" }}"
+        binding.tvLastEvent.text =
+            "Último evento: ${formatTime(state.lastEventAt)} type=${state.lastEventType} class=${state.lastClass.ifBlank { "nenhuma" }}"
+        binding.tvLastReadTime.text = "Última leitura com texto: ${formatTime(state.lastCaptureAt)}"
+        binding.tvCapturedCount.text = "Textos capturados: ${state.lastTextCount}"
+        binding.tvLastCapturedTexts.text = state.lastText.ifBlank { "Nenhum texto capturado ainda." }
+    }
+
+    private fun formatTime(timestamp: Long): String {
+        return if (timestamp > 0L) dateFormat.format(Date(timestamp)) else "nunca"
     }
 
     private fun isAccessibilityEnabled(): Boolean {
@@ -80,6 +111,7 @@ class HomeFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         checkPermissions()
+        refreshAccessibilityDebug()
     }
 
     override fun onDestroyView() {
