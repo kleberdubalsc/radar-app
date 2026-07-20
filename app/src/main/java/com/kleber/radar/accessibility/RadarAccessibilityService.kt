@@ -38,6 +38,7 @@ class RadarAccessibilityService : AccessibilityService() {
     private var lastProcessedText = ""
     private var lastFailedParserText = ""
     private var pollingJob: Job? = null
+    private var lastIdleHeartbeatAt = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -87,15 +88,9 @@ class RadarAccessibilityService : AccessibilityService() {
             AccessibilityDebugStore.saveEvent(this, pkg, className, eventType)
         }
 
-        val isUberPackage =
-            pkg.equals("com.ubercab.driver", ignoreCase = true) ||
-                pkg.contains("ubercab", ignoreCase = true) ||
-                pkg.contains("uber", ignoreCase = true)
-
-        debugLog(
-            "ON_ACCESSIBILITY_EVENT | type=$eventType | package=$pkg | class=$className | " +
-                "uberPackage=$isUberPackage"
-        )
+        if (isRideAppPackage(pkg)) {
+            debugLog("ON_ACCESSIBILITY_EVENT | type=$eventType | package=$pkg | class=$className")
+        }
 
         processCurrentWindow(
             source = "EVENTO:$pkg",
@@ -122,52 +117,71 @@ class RadarAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun isRideAppPackage(pkg: String): Boolean {
+        val p = pkg.lowercase(Locale.getDefault())
+        return p.contains("ubercab") ||
+            p.contains("uber") ||
+            p.contains("99taxis") ||
+            p.contains("99app") ||
+            p.contains("indriver") ||
+            p.contains("indrive")
+    }
+
+    /**
+     * Varredura completa da árvore de acessibilidade só roda quando um app de corrida
+     * (Uber/99/InDriver) está realmente na tela. Para qualquer outro app, o custo desta
+     * função é só ler o nome do pacote (sem percorrer a árvore de nós) — é isso que evita
+     * o app pesar o celular inteiro enquanto o motorista usa outros aplicativos.
+     */
     private fun processCurrentWindow(
         source: String,
         eventPackage: String = "POLLING",
         eventClassName: String = "POLLING",
         eventType: Int = -1
     ) {
-        val allText = mutableListOf<String>()
+        val relevantRoots = mutableListOf<AccessibilityNodeInfo>()
         var activePackage = eventPackage
 
         try {
             val root = rootInActiveWindow
-            if (root == null) {
-                debugLog(
-                    "ROOT NULL [$source] | package=$eventPackage | class=$eventClassName | type=$eventType | " +
-                        "motivo=sem janela ativa, conteudo nao disponivel ou app bloqueou acessibilidade"
-                )
-            } else {
-                activePackage = root.packageName?.toString() ?: eventPackage
-                debugLog(
-                    "ROOT OK [$source] | package=$activePackage | " +
-                        "class=${root.className ?: "sem_classe"} | children=${root.childCount}"
-                )
-                collectText(root, allText)
+            if (root != null) {
+                val rootPkg = root.packageName?.toString() ?: eventPackage
+                activePackage = rootPkg
+                if (isRideAppPackage(rootPkg)) {
+                    relevantRoots.add(root)
+                }
             }
         } catch (e: Exception) {
             debugLog("ERRO lendo rootInActiveWindow [$source]: ${e.message}")
         }
 
         try {
-            val currentWindows = windows
-            debugLog("WINDOWS [$source] | count=${currentWindows?.size ?: 0}")
-            currentWindows?.forEach { window ->
+            windows?.forEach { window ->
                 window.root?.let { root ->
-                    if (activePackage == "POLLING" || activePackage == "sem_pacote") {
-                        activePackage = root.packageName?.toString() ?: activePackage
+                    val rootPkg = root.packageName?.toString()
+                    if (rootPkg != null && isRideAppPackage(rootPkg)) {
+                        activePackage = rootPkg
+                        relevantRoots.add(root)
                     }
-                    debugLog(
-                        "WINDOW ROOT [$source] | package=${root.packageName ?: "sem_pacote"} | " +
-                            "class=${root.className ?: "sem_classe"} | children=${root.childCount}"
-                    )
-                    collectText(root, allText)
                 }
             }
         } catch (e: Exception) {
             debugLog("ERRO lendo windows [$source]: ${e.message}")
         }
+
+        if (relevantRoots.isEmpty()) {
+            val now = System.currentTimeMillis()
+            if (now - lastIdleHeartbeatAt > 5_000) {
+                lastIdleHeartbeatAt = now
+                debugLog("OCIOSO [$source] | package=$activePackage | nenhum app de corrida visivel")
+            }
+            return
+        }
+
+        debugLog("APP DE CORRIDA NA TELA [$source] | package=$activePackage")
+
+        val allText = mutableListOf<String>()
+        relevantRoots.forEach { collectText(it, allText) }
 
         val fullText = allText
             .map { it.trim() }
@@ -176,25 +190,23 @@ class RadarAccessibilityService : AccessibilityService() {
             .joinToString(" | ")
 
         debugLog(
-            "CAPTURA [$source] | package=$eventPackage | class=$eventClassName | type=$eventType | " +
+            "CAPTURA [$source] | package=$activePackage | class=$eventClassName | type=$eventType | " +
                 "textCount=${allText.size} | distinctTextCount=${allText.distinct().size}"
         )
 
         if (fullText.isBlank()) {
-            debugLog("CAPTURA SEM TEXTO [$source] | package=$eventPackage")
+            debugLog("CAPTURA SEM TEXTO [$source] | package=$activePackage")
             return
         }
 
-        if (!activePackage.equals(packageName, ignoreCase = true)) {
-            AccessibilityDebugStore.saveCapture(
-                context = this,
-                packageName = activePackage,
-                className = eventClassName,
-                eventType = eventType,
-                textCount = allText.distinct().size,
-                text = fullText
-            )
-        }
+        AccessibilityDebugStore.saveCapture(
+            context = this,
+            packageName = activePackage,
+            className = eventClassName,
+            eventType = eventType,
+            textCount = allText.distinct().size,
+            text = fullText
+        )
 
         debugLog("[$source] TEXTO BRUTO COLETADO (${allText.distinct().size} itens):\n$fullText")
 
@@ -338,21 +350,11 @@ class RadarAccessibilityService : AccessibilityService() {
     private fun collectText(node: AccessibilityNodeInfo, list: MutableList<String>) {
         try {
             node.text?.toString()?.let {
-                if (it.isNotBlank()) {
-                    list.add(it)
-                    debugLog("collectText TEXT | ${it.take(250)}")
-                }
+                if (it.isNotBlank()) list.add(it)
             }
 
             node.contentDescription?.toString()?.let {
-                if (it.isNotBlank()) {
-                    list.add(it)
-                    debugLog("collectText CONTENT_DESC | ${it.take(250)}")
-                }
-            }
-
-            node.viewIdResourceName?.toString()?.let {
-                if (it.isNotBlank()) debugLog("collectText VIEW_ID | $it")
+                if (it.isNotBlank()) list.add(it)
             }
 
             for (i in 0 until node.childCount) {
