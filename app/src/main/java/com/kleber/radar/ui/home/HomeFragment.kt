@@ -139,7 +139,7 @@ class HomeFragment : Fragment() {
 
         val textView = TextView(requireContext()).apply {
             text = content
-            isTextSelectable = true
+            setTextIsSelectable(true)
             setPadding(32, 24, 32, 24)
             textSize = 12f
         }
