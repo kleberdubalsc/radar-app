@@ -39,6 +39,7 @@ class RadarAccessibilityService : AccessibilityService() {
     private var lastFailedParserText = ""
     private var pollingJob: Job? = null
     private var lastIdleHeartbeatAt = 0L
+    private val lastRawEventLogAtByPackage = mutableMapOf<String, Long>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -58,7 +59,8 @@ class RadarAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                 AccessibilityEvent.TYPE_VIEW_SCROLLED or
                 AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or
-                AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                AccessibilityEvent.TYPE_WINDOWS_CHANGED or
+                AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
 
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             notificationTimeout = 50
@@ -90,6 +92,17 @@ class RadarAccessibilityService : AccessibilityService() {
 
         if (isRideAppPackage(pkg)) {
             debugLog("ON_ACCESSIBILITY_EVENT | type=$eventType | package=$pkg | class=$className")
+        } else {
+            // Diagnostico temporario: registra TODO pacote que dispara evento, mesmo os
+            // ignorados pelo filtro de app de corrida, para confirmar se com.ubercab.driver
+            // chega a aparecer aqui. Throttle por pacote (1 linha a cada 2s por pacote) para
+            // nao reintroduzir o problema de performance de logar todo evento do sistema.
+            val now = System.currentTimeMillis()
+            val lastLoggedAt = lastRawEventLogAtByPackage[pkg] ?: 0L
+            if (now - lastLoggedAt > 2_000) {
+                lastRawEventLogAtByPackage[pkg] = now
+                debugLog("EVENTO_BRUTO (nao-corrida) | type=$eventType | package=$pkg | class=$className")
+            }
         }
 
         processCurrentWindow(
