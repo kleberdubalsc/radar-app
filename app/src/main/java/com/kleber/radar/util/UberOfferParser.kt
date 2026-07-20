@@ -91,7 +91,9 @@ object UberOfferParser {
     fun diagnoseStructured(rawText: String): Diagnostic {
         val text = normalize(rawText)
         val values = extractValues(text)
-        val value = values.lastOrNull()
+        // O valor principal da corrida é sempre o primeiro "R$" que não vem prefixado com "+"
+        // (bônus de Priority aparecem como "+R$ 1,90 incluído" DEPOIS do valor da corrida).
+        val value = values.firstOrNull()
         val pickup = extractPickup(text)
         val trip = extractTrip(text)
         val tripDistance = trip?.distanceKm
@@ -142,8 +144,10 @@ object UberOfferParser {
     }
 
     private fun extractValues(text: String): List<Double> {
+        // (?<!\+) exclui bônus de Priority tipo "+R$ 1,90 incluído" — só interessa o valor
+        // principal da corrida, nunca o valor prefixado com "+".
         val valueRegex = Regex(
-            "R\\$\\s*([0-9]{1,3}(?:\\.[0-9]{3})*,[0-9]{2}|[0-9]+[,.][0-9]{2}|[0-9]+)",
+            "(?<!\\+)R\\$\\s*([0-9]{1,3}(?:\\.[0-9]{3})*,[0-9]{2}|[0-9]+[,.][0-9]{2}|[0-9]+)",
             RegexOption.IGNORE_CASE
         )
 
@@ -287,7 +291,7 @@ object UberOfferParser {
 
         var clean = value
             .replace(Regex("VIEW_ID:[^\\s]+", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("R\\$\\s*[0-9.,]+", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("\\+?R\\$\\s*[0-9.,]+\\s*(?:incluído|incluido)?(?:\\s+para)?", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("\\b(?:Selecionar|Aceitar|Recusar|UberX Share|Uber Comfort|Uber Black|Uber Flash Moto|Uber Flash|Uber Moto|Uber Planet|Uber Pet|Uber Bag|UberX|Comfort|Black|Flash Moto|Flash|Moto|Prioridade)\\b", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("\\s+"), " ")
             .trim(' ', '-', ',', '|')

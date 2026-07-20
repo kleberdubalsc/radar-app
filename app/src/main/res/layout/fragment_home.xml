@@ -29,11 +29,28 @@
             android:layout_marginBottom="8dp"
             android:visibility="gone" />
 
+        <TextView
+            android:id="@+id/tv_restricted_settings_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Se o botão acima não conseguir ativar a Acessibilidade: vá em Ajustes → Apps → Radar → toque no menu (⋮) no canto superior direito → &quot;Permitir configurações restritas&quot;. Depois volte e ative a Acessibilidade de novo. Isso acontece toda vez que um APK novo é instalado por fora da Play Store."
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_enable_overlay"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Permitir overlay"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_disable_battery_optimization"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Permitir rodar em segundo plano (bateria)"
             android:layout_marginBottom="16dp"
             android:visibility="gone" />
 
@@ -50,6 +67,10 @@
 
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:text="DIAGNÓSTICO DA CAPTURA" android:textSize="12sp" android:layout_marginBottom="8dp"/>
+
+                <TextView android:id="@+id/tv_installed_at" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="Build instalado em: —"
+                    android:textSize="12sp" android:layout_marginBottom="4dp" />
 
                 <TextView android:id="@+id/tv_accessibility_state" android:layout_width="match_parent"
                     android:layout_height="wrap_content" android:text="Serviço de acessibilidade: verificando" />
@@ -80,6 +101,14 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:text="Atualizar diagnóstico" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_view_full_log"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Ver log completo (radar_debug.txt)" />
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
